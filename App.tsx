@@ -30,7 +30,10 @@ const App: React.FC = () => {
     setPosts(prev => prev.map(p => 
       p.id === post.id ? { ...p, views: (p.views || 0) + 1 } : p
     ));
-    setSelectedPost(prev => prev && prev.id === post.id ? { ...post, views: (post.views || 0) + 1 } : post);
+    setSelectedPost(prev => {
+      const updatedPost = { ...post, views: (post.views || 0) + 1 };
+      return updatedPost;
+    });
   };
 
   const handleLikePost = (postId: string) => {
@@ -111,6 +114,17 @@ const App: React.FC = () => {
     });
   }, [posts, readerFeedTab, searchQuery, featuredPost]);
 
+  const relatedPosts = useMemo(() => {
+    if (!selectedPost) return [];
+    return posts
+      .filter(p => p.id !== selectedPost.id && p.status === 'published')
+      .filter(p => 
+        p.category === selectedPost.category || 
+        p.tags?.some(tag => selectedPost.tags?.includes(tag))
+      )
+      .slice(0, 3);
+  }, [selectedPost, posts]);
+
   return (
     <div className="min-h-screen transition-colors duration-300 bg-slate-50 dark:bg-slate-950">
       <Navbar 
@@ -134,9 +148,11 @@ const App: React.FC = () => {
             {selectedPost ? (
               <PostDetail 
                 post={selectedPost} 
+                relatedPosts={relatedPosts}
                 onBack={() => setSelectedPost(null)} 
                 onLike={handleLikePost}
                 onAddReview={handleAddReview}
+                onSelectPost={handleSelectPost}
               />
             ) : (
               <div className="space-y-12">
@@ -177,7 +193,7 @@ const App: React.FC = () => {
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="Search title, category, or tags..."
-                        className="w-full pl-11 pr-12 py-3 rounded-2xl border border-slate-200 bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 outline-none transition-all shadow-sm"
+                        className="w-full pl-11 pr-12 py-3 rounded-2xl border border-slate-200 bg-white dark:bg-slate-950 dark:border-slate-800 text-slate-900 dark:text-white focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 outline-none transition-all shadow-sm"
                       />
                       {searchQuery && (
                         <button 

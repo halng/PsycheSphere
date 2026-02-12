@@ -1,15 +1,25 @@
 
 import React, { useState } from 'react';
 import { BlogPost, Review } from '../types';
+import BlogCard from './BlogCard';
 
 interface PostDetailProps {
   post: BlogPost;
+  relatedPosts: BlogPost[];
   onBack: () => void;
   onLike: (postId: string) => void;
   onAddReview: (postId: string, comment: string) => void;
+  onSelectPost: (post: BlogPost) => void;
 }
 
-const PostDetail: React.FC<PostDetailProps> = ({ post, onBack, onLike, onAddReview }) => {
+const PostDetail: React.FC<PostDetailProps> = ({ 
+  post, 
+  relatedPosts, 
+  onBack, 
+  onLike, 
+  onAddReview,
+  onSelectPost
+}) => {
   const [newReview, setNewReview] = useState('');
   const [hasLiked, setHasLiked] = useState(false);
 
@@ -28,28 +38,56 @@ const PostDetail: React.FC<PostDetailProps> = ({ post, onBack, onLike, onAddRevi
 
   const unresolvedReviews = post.reviews.filter(r => !r.resolved);
 
+  const shareUrl = window.location.href;
+  const shareTitle = encodeURIComponent(post.title);
+  
+  const shareLinks = {
+    twitter: `https://twitter.com/intent/tweet?text=${shareTitle}&url=${encodeURIComponent(shareUrl)}`,
+    linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`,
+    facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`
+  };
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   return (
     <article className="mx-auto max-w-4xl py-12 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
         <button 
           onClick={onBack}
-          className="flex items-center gap-2 text-slate-500 hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400 transition-colors"
+          className="flex items-center gap-2 text-slate-500 hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400 transition-colors self-start"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
           Back to Feed
         </button>
-        <div className="flex items-center gap-4 text-sm font-medium text-slate-500 dark:text-slate-400">
-           <div className="flex items-center gap-1">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-            {post.views.toLocaleString()}
+        
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-3 border-r border-slate-200 dark:border-slate-800 pr-6 mr-2">
+            <a href={shareLinks.twitter} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-[#1DA1F2] transition-colors" title="Share on X">
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"/></svg>
+            </a>
+            <a href={shareLinks.linkedin} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-[#0A66C2] transition-colors" title="Share on LinkedIn">
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+            </a>
+            <a href={shareLinks.facebook} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-[#1877F2] transition-colors" title="Share on Facebook">
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+            </a>
           </div>
-          <button 
-            onClick={handleLike}
-            className={`flex items-center gap-1 transition-all ${hasLiked ? 'text-pink-500' : 'hover:text-pink-500'}`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill={hasLiked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
-            {post.likes}
-          </button>
+          
+          <div className="flex items-center gap-4 text-sm font-medium text-slate-500 dark:text-slate-400">
+             <div className="flex items-center gap-1">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              {post.views.toLocaleString()}
+            </div>
+            <button 
+              onClick={handleLike}
+              className={`flex items-center gap-1 transition-all ${hasLiked ? 'text-pink-500 scale-110' : 'hover:text-pink-500 hover:scale-105'}`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill={hasLiked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+              {post.likes}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -95,6 +133,62 @@ const PostDetail: React.FC<PostDetailProps> = ({ post, onBack, onLike, onAddRevi
           dangerouslySetInnerHTML={{ __html: post.content }}
         />
       </div>
+
+      {/* Post Footer Share Section */}
+      <div className="mt-16 py-8 border-y border-slate-200 dark:border-slate-800 flex flex-col items-center gap-6">
+        <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Liked this insight? Share it with your network</p>
+        <div className="flex flex-wrap justify-center gap-4">
+          <a 
+            href={shareLinks.twitter} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-2.5 font-bold text-white transition-all hover:bg-black hover:-translate-y-1 shadow-lg shadow-black/10"
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"/></svg>
+            Twitter
+          </a>
+          <a 
+            href={shareLinks.linkedin} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="flex items-center gap-2 rounded-xl bg-[#0A66C2] px-6 py-2.5 font-bold text-white transition-all hover:bg-[#084d91] hover:-translate-y-1 shadow-lg shadow-[#0A66C2]/20"
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+            LinkedIn
+          </a>
+          <a 
+            href={shareLinks.facebook} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="flex items-center gap-2 rounded-xl bg-[#1877F2] px-6 py-2.5 font-bold text-white transition-all hover:bg-[#165fc7] hover:-translate-y-1 shadow-lg shadow-[#1877F2]/20"
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+            Facebook
+          </a>
+        </div>
+      </div>
+
+      {/* Related Posts Section */}
+      {relatedPosts.length > 0 && (
+        <section className="mt-20">
+          <div className="flex items-center gap-4 mb-10">
+            <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter">Deepen Your Understanding</h2>
+            <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1"></div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {relatedPosts.map(related => (
+              <BlogCard 
+                key={related.id} 
+                post={related} 
+                onClick={(p) => {
+                  onSelectPost(p);
+                  scrollToTop();
+                }} 
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="mt-16 border-t border-slate-200 pt-10 dark:border-slate-800">
         <div className="rounded-[2rem] bg-slate-50 p-8 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800">
