@@ -24,7 +24,8 @@ export const INITIAL_POSTS: BlogPost[] = [
     views: 1240,
     likes: 45,
     reviews: [],
-    isFeatured: true
+    isFeatured: true,
+    metaDescription: 'Discover the science behind how habits are formed and how to change them effectively.'
   },
   {
     id: '2',
@@ -38,7 +39,8 @@ export const INITIAL_POSTS: BlogPost[] = [
     imageUrl: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&q=80&w=800',
     views: 856,
     likes: 32,
-    reviews: []
+    reviews: [],
+    metaDescription: 'Explore how early childhood attachment styles shape adult romantic relationships.'
   },
   {
     id: '3',
@@ -52,6 +54,7 @@ export const INITIAL_POSTS: BlogPost[] = [
     views: 120,
     likes: 18,
     content: '<p>Resilience is not a fixed trait; it is a dynamic process of adaptation. By practicing cognitive reframing, we can change our relationship with stress.</p>',
+    metaDescription: 'Learn about the psychological foundations of resilience and how to build mental strength.',
     reviews: [
       {
         id: 'r1',

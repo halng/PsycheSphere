@@ -4,7 +4,8 @@ import Navbar from './components/Navbar';
 import BlogCard from './components/BlogCard';
 import PostDetail from './components/PostDetail';
 import WriterDashboard from './components/WriterDashboard';
-import { BlogPost, UserRole, Review } from './types';
+import ProfilePage from './components/ProfilePage';
+import { BlogPost, UserRole, Review, UserProfile, Notification } from './types';
 import { INITIAL_POSTS } from './constants';
 
 const App: React.FC = () => {
@@ -12,8 +13,17 @@ const App: React.FC = () => {
   const [role, setRole] = useState<UserRole>('reader');
   const [isDark, setIsDark] = useState(false);
   const [selectedPost, setSelectedPost] = useState<BlogPost | null>(null);
-  const [readerFeedTab, setReaderFeedTab] = useState<'published' | 'review'>('published');
+  const [currentView, setCurrentView] = useState<'feed' | 'profile'>('feed');
+  const [readerFeedTab, setReaderFeedTab] = useState<'published' | 'review' | 'following'>('published');
   const [searchQuery, setSearchQuery] = useState('');
+  const [profile, setProfile] = useState<UserProfile>({
+    displayName: 'Dr. Sarah Chen',
+    suffix: 'PhD',
+    bio: 'Neuroscientist specializing in habit formation and cognitive behavioral therapy. Passionate about making complex brain science accessible to everyone.',
+    avatarUrl: 'https://ui-avatars.com/api/?name=Sarah+Chen&background=random',
+    followedAuthors: []
+  });
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -84,11 +94,46 @@ const App: React.FC = () => {
   const handleSavePost = (newPost: BlogPost) => {
     setPosts(prev => {
       const exists = prev.find(p => p.id === newPost.id);
+      
+      // Notify if transitioning to published or new published post
+      const isNewlyPublished = (!exists && newPost.status === 'published') || 
+                               (exists && exists.status !== 'published' && newPost.status === 'published');
+
+      if (isNewlyPublished) {
+        const newNotification: Notification = {
+          id: Math.random().toString(36).substring(7),
+          title: 'New Article Published',
+          message: `${newPost.author} just published: ${newPost.title}`,
+          date: new Date().toISOString().split('T')[0],
+          read: false,
+          type: 'new_post'
+        };
+        setNotifications(prevNotifs => [newNotification, ...prevNotifs]);
+      }
+
       if (exists) {
         return prev.map(p => p.id === newPost.id ? newPost : p);
       }
       return [newPost, ...prev];
     });
+  };
+
+  const handleFollowAuthor = (authorName: string) => {
+    setProfile(prev => ({
+      ...prev,
+      followedAuthors: [...prev.followedAuthors, authorName]
+    }));
+  };
+
+  const handleUnfollowAuthor = (authorName: string) => {
+    setProfile(prev => ({
+      ...prev,
+      followedAuthors: prev.followedAuthors.filter(a => a !== authorName)
+    }));
+  };
+
+  const handleMarkNotificationRead = (id: string) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
   };
 
   const handleDeletePost = (id: string) => {
@@ -99,7 +144,13 @@ const App: React.FC = () => {
   
   const filteredPosts = useMemo(() => {
     return posts.filter(p => {
-      const matchesTab = p.status === readerFeedTab;
+      let matchesTab = false;
+      if (readerFeedTab === 'following') {
+        matchesTab = p.status === 'published' && profile.followedAuthors.includes(p.author);
+      } else {
+        matchesTab = p.status === readerFeedTab;
+      }
+
       const query = searchQuery.toLowerCase().trim();
       
       const matchesSearch = !query || 
@@ -112,7 +163,7 @@ const App: React.FC = () => {
 
       return matchesTab && matchesSearch && (searchQuery ? true : isNotFeaturedHero);
     });
-  }, [posts, readerFeedTab, searchQuery, featuredPost]);
+  }, [posts, readerFeedTab, searchQuery, featuredPost, profile.followedAuthors]);
 
   const relatedPosts = useMemo(() => {
     if (!selectedPost) return [];
@@ -132,14 +183,25 @@ const App: React.FC = () => {
         setRole={(r) => {
           setRole(r);
           setSelectedPost(null);
+          setCurrentView('feed');
           setSearchQuery('');
         }} 
         isDark={isDark} 
         toggleTheme={toggleTheme}
         onHomeClick={() => {
           setSelectedPost(null);
+          setCurrentView('feed');
           setSearchQuery('');
         }}
+        onProfileClick={() => {
+          setSelectedPost(null);
+          setCurrentView('profile');
+          setSearchQuery('');
+        }}
+        currentView={currentView}
+        profile={profile}
+        notifications={notifications}
+        onMarkRead={handleMarkNotificationRead}
       />
 
       <main className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
@@ -153,6 +215,17 @@ const App: React.FC = () => {
                 onLike={handleLikePost}
                 onAddReview={handleAddReview}
                 onSelectPost={handleSelectPost}
+                isFollowing={profile.followedAuthors.includes(selectedPost.author)}
+                onFollow={() => handleFollowAuthor(selectedPost.author)}
+                onUnfollow={() => handleUnfollowAuthor(selectedPost.author)}
+              />
+            ) : currentView === 'profile' ? (
+              <ProfilePage 
+                profile={profile}
+                posts={posts}
+                onUpdateProfile={setProfile}
+                onSelectPost={handleSelectPost}
+                onUnfollow={handleUnfollowAuthor}
               />
             ) : (
               <div className="space-y-12">
@@ -173,6 +246,12 @@ const App: React.FC = () => {
                         className={`px-6 py-2.5 text-sm font-bold rounded-xl transition-all ${readerFeedTab === 'published' ? 'bg-white dark:bg-slate-800 text-primary-600 dark:text-white shadow-md' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
                       >
                         Latest Insights
+                      </button>
+                      <button 
+                        onClick={() => setReaderFeedTab('following')}
+                        className={`px-6 py-2.5 text-sm font-bold rounded-xl transition-all ${readerFeedTab === 'following' ? 'bg-white dark:bg-slate-800 text-primary-600 dark:text-white shadow-md' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                      >
+                        Following
                       </button>
                       <button 
                         onClick={() => setReaderFeedTab('review')}

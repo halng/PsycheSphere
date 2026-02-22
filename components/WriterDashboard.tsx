@@ -41,6 +41,7 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
   onSaveReviewResponse 
 }) => {
   const [editingPost, setEditingPost] = useState<Partial<BlogPost> | null>(null);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [replyTextMap, setReplyTextMap] = useState<Record<string, string>>({});
@@ -49,6 +50,13 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
   const [activeSidebarTab, setActiveSidebarTab] = useState<'settings' | 'reviews'>('settings');
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [tagInput, setTagInput] = useState('');
+
+  // Filtering and Sorting State
+  const [filterAuthor, setFilterAuthor] = useState<string>('all');
+  const [filterTag, setFilterTag] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<PostStatus | 'all'>('all');
+  const [sortBy, setSortBy] = useState<'likes' | 'reviews' | 'date' | 'views'>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   const quillRef = useRef<ReactQuill>(null);
 
@@ -66,6 +74,95 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
 
   const wordCount = useMemo(() => getWordCount(editingPost?.content || ''), [editingPost?.content]);
   const readingTime = useMemo(() => getReadingTime(wordCount), [wordCount]);
+
+  const uniqueAuthors = useMemo(() => {
+    const authors = new Set(posts.map(p => p.author));
+    return Array.from(authors).sort();
+  }, [posts]);
+
+  const uniqueTags = useMemo(() => {
+    const tags = new Set<string>();
+    posts.forEach(p => p.tags?.forEach(t => tags.add(t)));
+    return Array.from(tags).sort();
+  }, [posts]);
+
+  const filteredAndSortedPosts = useMemo(() => {
+    let result = [...posts];
+
+    // Filtering
+    if (filterAuthor !== 'all') {
+      result = result.filter(p => p.author === filterAuthor);
+    }
+    if (filterTag !== 'all') {
+      result = result.filter(p => p.tags?.includes(filterTag));
+    }
+    if (filterStatus !== 'all') {
+      result = result.filter(p => p.status === filterStatus);
+    }
+
+    // Sorting
+    result.sort((a, b) => {
+      let valA: any, valB: any;
+      
+      switch (sortBy) {
+        case 'likes':
+          valA = a.likes;
+          valB = b.likes;
+          break;
+        case 'reviews':
+          valA = a.reviews.length;
+          valB = b.reviews.length;
+          break;
+        case 'views':
+          valA = a.views;
+          valB = b.views;
+          break;
+        case 'date':
+        default:
+          valA = new Date(a.date).getTime();
+          valB = new Date(b.date).getTime();
+          break;
+      }
+
+      if (sortOrder === 'asc') {
+        return valA > valB ? 1 : -1;
+      } else {
+        return valA < valB ? 1 : -1;
+      }
+    });
+
+    return result;
+  }, [posts, filterAuthor, filterTag, filterStatus, sortBy, sortOrder]);
+
+  // Auto-save logic
+  useEffect(() => {
+    if (!editingPost || !editingPost.id || !editingPost.title || !editingPost.content) return;
+
+    const timer = setTimeout(() => {
+      setAutoSaveStatus('saving');
+      try {
+        const finalPost: BlogPost = {
+          ...editingPost as BlogPost,
+          status: editingPost.status || 'draft',
+          views: editingPost.views || 0,
+          likes: editingPost.likes || 0,
+          reviews: editingPost.reviews || [],
+          isFeatured: editingPost.isFeatured || false,
+          tags: editingPost.tags || [],
+          metaDescription: editingPost.metaDescription || '',
+          excerpt: editingPost.excerpt || editingPost.content.replace(/<[^>]*>?/gm, '').substring(0, 150) + '...'
+        };
+        onSave(finalPost);
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus('idle'), 2000);
+      } catch (error) {
+        console.error('Auto-save failed:', error);
+        setAutoSaveStatus('error');
+      }
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [editingPost, onSave]);
 
   const EditorComponent = useMemo(() => {
     if (!ReactQuill) return null;
@@ -104,7 +201,6 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
     setIsEnhancing(true);
     try {
       const refined = await polishPsychologyContent(editingPost.title, editingPost.content);
-      // We only update the content, keeping the title and other metadata intact.
       setEditingPost(prev => prev ? ({ ...prev, content: refined }) : null);
     } catch (error) {
       alert("Failed to refine grammar. Please try again.");
@@ -145,19 +241,13 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
     const editor = quillRef.current?.getEditor();
     if (!editor) return;
 
-    const content = editor.root.innerHTML;
-    const markerStr = `data-review-id="${reviewId}"`;
-    const markerIndex = content.indexOf(markerStr);
-    
-    if (markerIndex !== -1) {
-      const blot = Array.from(editor.root.querySelectorAll('.feedback-marker'))
-        .find(el => el.getAttribute('data-review-id') === reviewId) as HTMLElement;
+    const blot = Array.from(editor.root.querySelectorAll('.feedback-marker'))
+      .find(el => (el as HTMLElement).getAttribute('data-review-id') === reviewId) as HTMLElement;
 
-      if (blot) {
-        blot.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        blot.classList.add('pulse-highlight');
-        setTimeout(() => blot.classList.remove('pulse-highlight'), 3000);
-      }
+    if (blot) {
+      blot.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      blot.classList.add('pulse-highlight');
+      setTimeout(() => blot.classList.remove('pulse-highlight'), 3000);
     }
   };
 
@@ -167,7 +257,7 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
 
   const handleReplySubmit = (reviewId: string) => {
     if (!editingPost?.id) return;
-    const text = replyTextMap[reviewId] || "";
+    const text = replyTextMap[reviewId] ?? (editingPost.reviews?.find(r => r.id === reviewId)?.authorResponse || "");
     onSaveReviewResponse(editingPost.id, reviewId, text);
     
     if (editingPost.reviews) {
@@ -242,8 +332,77 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
             </button>
           </div>
 
+          <div className="flex flex-wrap items-center gap-4 p-4 rounded-2xl bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Author</label>
+              <select 
+                value={filterAuthor}
+                onChange={(e) => setFilterAuthor(e.target.value)}
+                className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 outline-none focus:ring-2 focus:ring-primary-500/20"
+              >
+                <option value="all">All Authors</option>
+                {uniqueAuthors.map(author => <option key={author} value={author}>{author}</option>)}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Tag</label>
+              <select 
+                value={filterTag}
+                onChange={(e) => setFilterTag(e.target.value)}
+                className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 outline-none focus:ring-2 focus:ring-primary-500/20"
+              >
+                <option value="all">All Tags</option>
+                {uniqueTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Status</label>
+              <select 
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value as any)}
+                className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 outline-none focus:ring-2 focus:ring-primary-500/20"
+              >
+                <option value="all">All Statuses</option>
+                <option value="draft">Draft</option>
+                <option value="review">Review</option>
+                <option value="published">Published</option>
+              </select>
+            </div>
+
+            <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-2 hidden md:block"></div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Sort By</label>
+              <div className="flex items-center gap-2">
+                <select 
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as any)}
+                  className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 outline-none focus:ring-2 focus:ring-primary-500/20"
+                >
+                  <option value="date">Date</option>
+                  <option value="likes">Likes</option>
+                  <option value="reviews">Reviews</option>
+                  <option value="views">Views</option>
+                </select>
+                <button 
+                  onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                  className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-primary-500 transition-colors"
+                  title={`Sort ${sortOrder === 'asc' ? 'Ascending' : 'Descending'}`}
+                >
+                  {sortOrder === 'asc' ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/><path d="M11 12h4"/><path d="M11 16h7"/><path d="M11 20h10"/></svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M11 4h10"/><path d="M11 8h7"/><path d="M11 12h4"/></svg>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="grid gap-6">
-            {posts.map((post) => (
+            {filteredAndSortedPosts.map((post) => (
               <div key={post.id} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 transition-all hover:border-primary-200">
                 <div className="flex items-center gap-4">
                   <div className="h-16 w-24 overflow-hidden rounded-lg border border-slate-100 dark:border-slate-800 relative bg-slate-100 dark:bg-slate-800">
@@ -291,7 +450,6 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
         </div>
       ) : (
         <div className="flex flex-col lg:flex-row gap-0 lg:gap-8 -mt-8 -mx-4 lg:mx-0 min-h-[calc(100vh-80px)]">
-          {/* Main Editor Section */}
           <div className={`flex-1 flex flex-col transition-all duration-300 ${isFocusMode ? 'lg:max-w-4xl mx-auto px-4 lg:px-0' : 'px-4 lg:px-0 lg:max-w-[70%]'}`}>
             <header className="py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between sticky top-0 bg-slate-50 dark:bg-slate-950 z-20">
               <div className="flex items-center gap-4">
@@ -317,6 +475,28 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                   <button onClick={() => setShowPreview(false)} className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${!showPreview ? 'bg-white text-primary-600 shadow dark:bg-slate-700 dark:text-white' : 'text-slate-500'}`}>Editor</button>
                   <button onClick={() => setShowPreview(true)} className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${showPreview ? 'bg-white text-primary-600 shadow dark:bg-slate-700 dark:text-white' : 'text-slate-500'}`}>Preview</button>
                 </div>
+                {autoSaveStatus !== 'idle' && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-300">
+                    {autoSaveStatus === 'saving' && (
+                      <>
+                        <svg className="animate-spin h-3 w-3 text-primary-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Saving...</span>
+                      </>
+                    )}
+                    {autoSaveStatus === 'saved' && (
+                      <>
+                        <svg className="h-3 w-3 text-emerald-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                        <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Saved</span>
+                      </>
+                    )}
+                    {autoSaveStatus === 'error' && (
+                      <>
+                        <svg className="h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest">Error</span>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </header>
 
@@ -405,7 +585,6 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
             </div>
           </div>
 
-          {/* Right Sidebar - WordPress Style Settings */}
           {!isFocusMode && (
             <aside className="w-full lg:w-[30%] border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 flex flex-col h-full sticky top-0">
               <div className="flex border-b border-slate-200 dark:border-slate-800">
@@ -505,6 +684,16 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                     </section>
 
                     <section className="space-y-4">
+                       <h4 className="text-xs font-black uppercase tracking-tighter text-slate-400">Meta Description (SEO)</h4>
+                       <textarea
+                         value={editingPost.metaDescription || ''}
+                         onChange={(e) => setEditingPost(prev => prev ? ({ ...prev, metaDescription: e.target.value }) : null)}
+                         placeholder="Enter meta description for search engines..."
+                         className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-900 dark:text-white h-20 resize-none"
+                       />
+                    </section>
+
+                    <section className="space-y-4">
                        <h4 className="text-xs font-black uppercase tracking-tighter text-slate-400">Journal Standard Metrics</h4>
                        <div className="space-y-4 p-4 rounded-2xl bg-slate-900 text-white shadow-xl">
                           <div className="grid grid-cols-2 gap-2">
@@ -517,15 +706,6 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                               <p className="text-lg font-bold">{readingTime} <span className="text-[10px] font-normal">min</span></p>
                             </div>
                           </div>
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-[10px]">
-                              <span className="text-slate-400">Scholarly Depth</span>
-                              <span className={isLengthSufficient ? 'text-emerald-400' : 'text-slate-500'}>{wordCount}/{minWordsNeeded}</span>
-                            </div>
-                            <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
-                              <div className={`h-full transition-all duration-700 ${isLengthSufficient ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${Math.min((wordCount/minWordsNeeded)*100, 100)}%` }} />
-                            </div>
-                          </div>
                        </div>
                     </section>
                   </>
@@ -534,13 +714,15 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                     {editingPost.reviews && editingPost.reviews.length > 0 ? (
                       editingPost.reviews.map((review) => {
                         const isLinked = editingPost.content?.includes(`data-review-id="${review.id}"`);
+                        const currentResponse = replyTextMap[review.id] ?? review.authorResponse ?? "";
+                        
                         return (
-                          <div key={review.id} className={`p-4 rounded-xl border transition-all ${review.resolved ? 'bg-emerald-50/20 border-emerald-100 opacity-60' : 'bg-slate-50 border-slate-100 dark:bg-slate-900/50 dark:border-slate-800'}`}>
+                          <div key={review.id} className={`p-4 rounded-xl border transition-all ${review.resolved ? 'bg-slate-50 border-slate-100 dark:bg-slate-900/30 dark:border-slate-800/50' : 'bg-slate-50 border-slate-100 dark:bg-slate-900/50 dark:border-slate-800'}`}>
                             <div className="flex justify-between items-start gap-2 mb-2">
                               <div className="flex items-center gap-1.5">
                                 <span className="text-[10px] font-bold text-slate-500">{review.author}</span>
                                 {isLinked && (
-                                  <button onClick={() => jumpToReviewSource(review.id)} className="p-0.5 rounded text-primary-500 hover:bg-primary-50 transition-colors">
+                                  <button onClick={() => jumpToReviewSource(review.id)} className="p-0.5 rounded text-primary-500 hover:bg-primary-50 transition-colors" title="Jump to source">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
                                   </button>
                                 )}
@@ -549,23 +731,30 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
                               </button>
                             </div>
-                            <p className={`text-[11px] leading-relaxed mb-3 ${review.resolved ? 'text-slate-400 line-through' : 'text-slate-700 dark:text-slate-300'}`}>
+                            <p className={`text-[11px] leading-relaxed mb-4 ${review.resolved ? 'text-slate-400 line-through' : 'text-slate-700 dark:text-slate-300'}`}>
                               {review.comment}
                             </p>
-                            {!review.resolved && (
-                              <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+                            
+                            <div className="space-y-2 pt-3 border-t border-slate-200 dark:border-slate-700">
+                                <div className="flex items-center justify-between mb-1">
+                                  <label className="text-[9px] font-black uppercase tracking-widest text-primary-600 dark:text-primary-400">Author Response</label>
+                                  {review.authorResponse && review.authorResponse === currentResponse && (
+                                    <span className="text-[8px] text-emerald-500 font-bold uppercase">Saved</span>
+                                  )}
+                                </div>
                                 <textarea
-                                  value={replyTextMap[review.id] ?? review.authorResponse ?? ""}
+                                  value={currentResponse}
                                   onChange={(e) => handleReplyChange(review.id, e.target.value)}
-                                  placeholder="Reply..."
-                                  className="w-full text-[10px] p-2 rounded-lg border border-slate-200 bg-white dark:bg-slate-800 dark:border-slate-700 h-16 resize-none"
+                                  placeholder="Address this feedback..."
+                                  className="w-full text-[10px] p-2 rounded-lg border border-slate-200 bg-white dark:bg-slate-800 dark:border-slate-700 h-20 resize-none focus:ring-1 focus:ring-primary-500 outline-none"
                                 />
-                                <button onClick={() => handleReplySubmit(review.id)} className="w-full py-1.5 text-[10px] font-bold bg-primary-600 text-white rounded-lg hover:bg-primary-700">Save Response</button>
-                              </div>
-                            )}
-                            {review.resolved && review.authorResponse && (
-                              <p className="text-[10px] italic text-emerald-600 mt-2">Resp: {review.authorResponse}</p>
-                            )}
+                                <button 
+                                  onClick={() => handleReplySubmit(review.id)} 
+                                  className="w-full py-1.5 text-[10px] font-bold bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors shadow-sm"
+                                >
+                                  Save Response
+                                </button>
+                            </div>
                           </div>
                         );
                       })
@@ -581,7 +770,6 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                 )}
               </div>
 
-              {/* Action Bar inside Sidebar */}
               <div className="p-6 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
                 <div className="grid grid-cols-2 gap-2 mb-4">
                    <button onClick={() => savePost('draft')} className="py-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">Draft</button>
@@ -604,7 +792,6 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
             </aside>
           )}
 
-          {/* Floating Action for Focus Mode */}
           {isFocusMode && (
             <div className="fixed bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl p-2 rounded-2xl shadow-2xl ring-1 ring-slate-200 dark:ring-slate-800 z-50 animate-in slide-in-from-bottom-8">
                <button onClick={() => setIsFocusMode(false)} className="p-3 text-slate-500 hover:text-primary-600 transition-colors">

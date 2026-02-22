@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BlogPost, Review } from '../types';
 import BlogCard from './BlogCard';
 
@@ -10,6 +10,9 @@ interface PostDetailProps {
   onLike: (postId: string) => void;
   onAddReview: (postId: string, comment: string) => void;
   onSelectPost: (post: BlogPost) => void;
+  isFollowing: boolean;
+  onFollow: () => void;
+  onUnfollow: () => void;
 }
 
 const PostDetail: React.FC<PostDetailProps> = ({ 
@@ -18,10 +21,64 @@ const PostDetail: React.FC<PostDetailProps> = ({
   onBack, 
   onLike, 
   onAddReview,
-  onSelectPost
+  onSelectPost,
+  isFollowing,
+  onFollow,
+  onUnfollow
 }) => {
   const [newReview, setNewReview] = useState('');
   const [hasLiked, setHasLiked] = useState(false);
+  const [scrollProgress, setScrollProgress] = useState(0);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
+      const progress = (window.scrollY / totalHeight) * 100;
+      setScrollProgress(progress);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    // Update SEO meta tags
+    const title = `${post.title} | PsycheSphere`;
+    const description = post.metaDescription || post.excerpt;
+    
+    document.title = title;
+    
+    let metaDescription = document.querySelector('meta[name="description"]');
+    if (!metaDescription) {
+      metaDescription = document.createElement('meta');
+      metaDescription.setAttribute('name', 'description');
+      document.head.appendChild(metaDescription);
+    }
+    metaDescription.setAttribute('content', description);
+
+    // Open Graph tags
+    const ogTags = [
+      { property: 'og:title', content: title },
+      { property: 'og:description', content: description },
+      { property: 'og:image', content: post.imageUrl },
+      { property: 'og:type', content: 'article' }
+    ];
+
+    ogTags.forEach(tag => {
+      let element = document.querySelector(`meta[property="${tag.property}"]`);
+      if (!element) {
+        element = document.createElement('meta');
+        element.setAttribute('property', tag.property);
+        document.head.appendChild(element);
+      }
+      element.setAttribute('content', tag.content);
+    });
+
+    return () => {
+      // Reset title on unmount
+      document.title = 'PsycheSphere - Psychology Blog';
+    };
+  }, [post]);
 
   const handleLike = () => {
     if (!hasLiked) {
@@ -40,9 +97,12 @@ const PostDetail: React.FC<PostDetailProps> = ({
 
   const shareUrl = window.location.href;
   const shareTitle = encodeURIComponent(post.title);
+  const shareSummary = encodeURIComponent(post.excerpt);
   
   const shareLinks = {
-    twitter: `https://twitter.com/intent/tweet?text=${shareTitle}&url=${encodeURIComponent(shareUrl)}`,
+    // Twitter/X supports a text parameter which can include title and summary
+    twitter: `https://twitter.com/intent/tweet?text=${shareTitle}%0A%0A${shareSummary}&url=${encodeURIComponent(shareUrl)}`,
+    // LinkedIn and Facebook sharers primarily rely on Open Graph meta tags of the provided URL
     linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`,
     facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`
   };
@@ -53,6 +113,14 @@ const PostDetail: React.FC<PostDetailProps> = ({
 
   return (
     <article className="mx-auto max-w-4xl py-12 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* Reading Progress Bar */}
+      <div className="fixed top-0 left-0 w-full h-1 z-[60] bg-slate-200 dark:bg-slate-800">
+        <div 
+          className="h-full bg-primary-600 transition-all duration-150 ease-out"
+          style={{ width: `${scrollProgress}%` }}
+        />
+      </div>
+
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
         <button 
           onClick={onBack}
@@ -113,11 +181,17 @@ const PostDetail: React.FC<PostDetailProps> = ({
         <h1 className="mb-6 text-4xl font-extrabold tracking-tight text-slate-900 md:text-5xl dark:text-white leading-tight">
           {post.title}
         </h1>
-        <div className="flex items-center justify-center gap-4 text-slate-500 dark:text-slate-400">
+        <div className="flex items-center justify-center gap-6 text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-2">
             <img src={`https://ui-avatars.com/api/?name=${post.author}&background=random`} className="h-10 w-10 rounded-full" alt="" />
             <span className="font-semibold">{post.author}</span>
           </div>
+          <button 
+            onClick={isFollowing ? onUnfollow : onFollow}
+            className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${isFollowing ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' : 'bg-primary-600 text-white hover:bg-primary-700 shadow-lg shadow-primary-500/20'}`}
+          >
+            {isFollowing ? 'Following' : 'Follow Author'}
+          </button>
           <span>•</span>
           <time>{new Date(post.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</time>
         </div>

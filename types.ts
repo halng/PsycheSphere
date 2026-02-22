@@ -30,9 +30,28 @@ export interface BlogPost {
 
 export type UserRole = 'reader' | 'writer';
 
+export interface UserProfile {
+  displayName: string;
+  suffix: string;
+  bio: string;
+  avatarUrl: string;
+  followedAuthors: string[];
+}
+
+export interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  date: string;
+  read: boolean;
+  type: 'new_post' | 'review' | 'system';
+}
+
 export interface AppState {
   posts: BlogPost[];
   role: UserRole;
   isDark: boolean;
   selectedPost: BlogPost | null;
+  profile: UserProfile;
+  notifications: Notification[];
 }
