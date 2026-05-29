@@ -9,7 +9,9 @@ interface NavbarProps {
   toggleTheme: () => void;
   onHomeClick: () => void;
   onProfileClick: () => void;
-  currentView: 'feed' | 'profile';
+  currentView: 'feed' | 'profile' | 'writer-request';
+  canSwitchToWriter: boolean;
+  onRequestWriterAccess: () => void;
   profile: UserProfile;
   notifications: Notification[];
   onMarkRead: (id: string) => void;
@@ -23,6 +25,8 @@ const Navbar: React.FC<NavbarProps> = ({
   onHomeClick, 
   onProfileClick,
   currentView,
+  canSwitchToWriter,
+  onRequestWriterAccess,
   profile,
   notifications,
   onMarkRead
@@ -60,24 +64,32 @@ const Navbar: React.FC<NavbarProps> = ({
 
           <div className="flex items-center gap-4">
             <button
-              onClick={() => setRole(role === 'reader' ? 'writer' : 'reader')}
+              onClick={() => {
+                if (role === 'reader' && !canSwitchToWriter) {
+                  onRequestWriterAccess();
+                  return;
+                }
+                setRole(role === 'reader' ? 'writer' : 'reader');
+              }}
               className="rounded-full bg-slate-100 px-4 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors"
             >
-              Switch to {role === 'reader' ? 'Writer' : 'Reader'}
+              {role === 'reader' ? (canSwitchToWriter ? 'Switch to Writer' : 'Request Writer Access') : 'Switch to Reader'}
             </button>
 
             <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 mx-1"></div>
 
             <button
               onClick={toggleTheme}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 transition-colors"
+              className="flex h-10 items-center gap-2 rounded-full border border-slate-200 px-3 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 transition-colors"
               aria-label="Toggle theme"
+              title={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
             >
               {isDark ? (
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
               ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
               )}
+              <span className="hidden text-xs font-bold sm:inline">{isDark ? 'Light' : 'Dark'}</span>
             </button>
 
             <div className="relative">

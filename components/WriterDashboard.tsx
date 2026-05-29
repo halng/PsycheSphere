@@ -3,7 +3,8 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import ReactQuill from 'react-quill';
 import { BlogPost, PostStatus, Review } from '../types';
 import { CATEGORIES } from '../constants';
-import { polishPsychologyContent, generateExcerpt } from '../services/geminiService';
+import { polishPsychologyContent } from '../services/geminiService';
+import { generateChatGptSocialKit } from '../services/openaiService';
 
 // Custom Quill Blot for Feedback Markers
 const QuillInstance: any = (ReactQuill as any).Quill;
@@ -33,6 +34,36 @@ interface WriterDashboardProps {
   onSaveReviewResponse: (postId: string, reviewId: string, response: string) => void;
 }
 
+const STATUS_LABELS: Record<PostStatus, string> = {
+  draft: 'Draft',
+  ai_generated: 'AI Kit Ready',
+  author_review: 'Author Review',
+  review: 'Reviewer Review',
+  reviewer_approved: 'Reviewer Approved',
+  published: 'Published to Website',
+  social_posted: 'Posted to Social',
+};
+
+const STATUS_STYLES: Record<PostStatus, string> = {
+  draft: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400',
+  ai_generated: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300',
+  author_review: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',
+  review: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  reviewer_approved: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300',
+  published: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  social_posted: 'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/30 dark:text-fuchsia-300',
+};
+
+const LIFECYCLE_STEPS: { status: PostStatus; title: string; description: string }[] = [
+  { status: 'draft', title: 'Create post', description: 'Writer drafts title, cover, body, and SEO settings.' },
+  { status: 'ai_generated', title: 'AI social kit', description: 'Generate summary, caption, and infographic asset.' },
+  { status: 'author_review', title: 'Author review', description: 'Send generated assets back to the author for approval.' },
+  { status: 'review', title: 'Reviewer review', description: 'Reviewer checks content quality and adds feedback.' },
+  { status: 'reviewer_approved', title: 'Reviewer approves', description: 'Reviewer signs off once feedback is resolved.' },
+  { status: 'published', title: 'Publish website', description: 'Post appears on the public blog.' },
+  { status: 'social_posted', title: 'Post social', description: 'Caption and infographic are posted to selected channels.' },
+];
+
 const WriterDashboard: React.FC<WriterDashboardProps> = ({ 
   posts, 
   onSave, 
@@ -43,6 +74,7 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
   const [editingPost, setEditingPost] = useState<Partial<BlogPost> | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [isEnhancing, setIsEnhancing] = useState(false);
+  const [isGeneratingSocialKit, setIsGeneratingSocialKit] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [replyTextMap, setReplyTextMap] = useState<Record<string, string>>({});
   const [selectionRange, setSelectionRange] = useState<{ index: number, length: number } | null>(null);
@@ -209,6 +241,87 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
     }
   };
 
+  const handleGenerateSocialKit = async () => {
+    if (!editingPost?.title || !editingPost?.content) {
+      alert("Please provide a title and content before generating social assets.");
+      return;
+    }
+
+    setIsGeneratingSocialKit(true);
+    try {
+      const socialKit = await generateChatGptSocialKit({
+        title: editingPost.title,
+        content: editingPost.content,
+        category: editingPost.category || 'Psychology'
+      });
+      setEditingPost(prev => prev ? ({
+        ...prev,
+        ...socialKit,
+        excerpt: prev.excerpt || socialKit.aiSummary,
+        metaDescription: prev.metaDescription || socialKit.aiSummary,
+        status: 'ai_generated',
+        socialChannels: prev.socialChannels?.length ? prev.socialChannels : ['Website', 'LinkedIn', 'X/Twitter', 'Facebook']
+      }) : null);
+      setActiveSidebarTab('settings');
+    } catch (error) {
+      alert("Failed to generate the social kit. Please try again.");
+    } finally {
+      setIsGeneratingSocialKit(false);
+    }
+  };
+
+  const saveCurrentLifecyclePost = (updates: Partial<BlogPost>) => {
+    if (!editingPost?.title || !editingPost?.content) return;
+
+    const updatedPost: BlogPost = {
+      ...editingPost as BlogPost,
+      ...updates,
+      views: editingPost.views || 0,
+      likes: editingPost.likes || 0,
+      reviews: editingPost.reviews || [],
+      isFeatured: editingPost.isFeatured || false,
+      tags: editingPost.tags || [],
+      metaDescription: editingPost.metaDescription || '',
+      excerpt: editingPost.excerpt || editingPost.aiSummary || editingPost.content.replace(/<[^>]*>?/gm, '').substring(0, 150) + '...',
+      socialChannels: editingPost.socialChannels || ['Website', 'LinkedIn', 'X/Twitter', 'Facebook']
+    };
+
+    onSave(updatedPost);
+    setEditingPost(updatedPost);
+  };
+
+  const handleSendAuthorReview = () => {
+    saveCurrentLifecyclePost({ status: 'author_review' });
+  };
+
+  const handleAuthorApprove = () => {
+    saveCurrentLifecyclePost({
+      status: 'review',
+      authorApprovedAt: new Date().toISOString().split('T')[0],
+    });
+  };
+
+  const handleReviewerApprove = () => {
+    saveCurrentLifecyclePost({
+      status: 'reviewer_approved',
+      reviewerApprovedAt: new Date().toISOString().split('T')[0],
+    });
+  };
+
+  const handlePublishWebsite = () => {
+    saveCurrentLifecyclePost({
+      status: 'published',
+      publishedAt: new Date().toISOString().split('T')[0],
+    });
+  };
+
+  const handlePostSocial = () => {
+    saveCurrentLifecyclePost({
+      status: 'social_posted',
+      socialPostedAt: new Date().toISOString().split('T')[0],
+    });
+  };
+
   const savePost = (status: PostStatus) => {
     if (!editingPost?.title || !editingPost?.content) return;
     
@@ -299,7 +412,15 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
   const currentLikes = editingPost?.likes || 0;
   const unresolvedReviewsCount = (editingPost?.reviews || []).filter(r => !r.resolved).length;
   const isLengthSufficient = wordCount >= minWordsNeeded;
-  const canPublish = currentLikes >= likesNeeded && unresolvedReviewsCount === 0 && isLengthSufficient;
+  const lifecycleIndex = LIFECYCLE_STEPS.findIndex(step => step.status === editingPost?.status);
+  const hasSocialKit = Boolean(editingPost?.aiSummary && editingPost?.infographicUrl && editingPost?.socialCaption);
+  const isAuthorApproved = Boolean(editingPost?.authorApprovedAt);
+  const isReviewerApproved = Boolean(editingPost?.reviewerApprovedAt);
+  const canSendAuthorReview = hasSocialKit;
+  const canSendReviewerReview = hasSocialKit && isAuthorApproved;
+  const canReviewerApprove = editingPost?.status === 'review' && unresolvedReviewsCount === 0;
+  const canPublish = editingPost?.status === 'reviewer_approved' && isReviewerApproved;
+  const canPostSocial = editingPost?.status === 'published' && Boolean(editingPost?.socialCaption && editingPost?.infographicUrl);
 
   const handleEditorSelection = (range: any) => {
     if (range && range.length > 0) {
@@ -365,9 +486,9 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                 className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 outline-none focus:ring-2 focus:ring-primary-500/20"
               >
                 <option value="all">All Statuses</option>
-                <option value="draft">Draft</option>
-                <option value="review">Review</option>
-                <option value="published">Published</option>
+                {LIFECYCLE_STEPS.map(step => (
+                  <option key={step.status} value={step.status}>{step.title}</option>
+                ))}
               </select>
             </div>
 
@@ -416,12 +537,8 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                   <div>
                     <h4 className="font-bold text-slate-900 dark:text-white">{post.title}</h4>
                     <div className="mt-1 flex items-center gap-3">
-                      <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                        post.status === 'published' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
-                        post.status === 'review' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
-                        'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400'
-                      }`}>
-                        {post.status}
+                      <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${STATUS_STYLES[post.status]}`}>
+                        {STATUS_LABELS[post.status]}
                       </span>
                       <span className="text-xs text-slate-400 flex items-center gap-1">
                         <svg className="text-pink-400" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
@@ -457,7 +574,7 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
                 </button>
                 <div className="flex flex-col">
-                  <span className="text-[10px] font-black uppercase tracking-tighter text-slate-400">Status: {editingPost.status}</span>
+                  <span className="text-[10px] font-black uppercase tracking-tighter text-slate-400">Status: {STATUS_LABELS[editingPost.status || 'draft']}</span>
                   <h2 className="text-sm font-bold text-slate-900 dark:text-white truncate max-w-[200px]">
                     {editingPost.title || 'Untitled Draft'}
                   </h2>
@@ -473,7 +590,7 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                 </button>
                 <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-xl">
                   <button onClick={() => setShowPreview(false)} className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${!showPreview ? 'bg-white text-primary-600 shadow dark:bg-slate-700 dark:text-white' : 'text-slate-500'}`}>Editor</button>
-                  <button onClick={() => setShowPreview(true)} className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${showPreview ? 'bg-white text-primary-600 shadow dark:bg-slate-700 dark:text-white' : 'text-slate-500'}`}>Preview</button>
+                  <button onClick={() => setShowPreview(true)} className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${showPreview ? 'bg-white text-primary-600 shadow dark:bg-slate-700 dark:text-white' : 'text-slate-500'}`}>Live Preview</button>
                 </div>
                 {autoSaveStatus !== 'idle' && (
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-300">
@@ -536,14 +653,24 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                   <div className="min-h-[500px]">
                     <div className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800 mb-4 sticky top-[60px] bg-slate-50 dark:bg-slate-950 z-10">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Article Body</span>
-                      <button
-                        onClick={handleRefineGrammar}
-                        disabled={isEnhancing}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isEnhancing ? 'bg-primary-50 text-primary-400' : 'bg-primary-100 text-primary-700 hover:bg-primary-200 dark:bg-primary-900/30 dark:text-primary-400'}`}
-                      >
-                        <svg className={`h-3 w-3 ${isEnhancing ? 'animate-spin' : ''}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-                        {isEnhancing ? 'Refining Text...' : 'Refine Grammar & Style'}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleGenerateSocialKit}
+                          disabled={isGeneratingSocialKit}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isGeneratingSocialKit ? 'bg-violet-50 text-violet-400' : 'bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-300'}`}
+                        >
+                          <svg className={`h-3 w-3 ${isGeneratingSocialKit ? 'animate-spin' : ''}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18"/><path d="m19 9-7-6-7 6"/><path d="M5 15h14"/></svg>
+                          {isGeneratingSocialKit ? 'Generating Kit...' : 'AI Summary + Infographic'}
+                        </button>
+                        <button
+                          onClick={handleRefineGrammar}
+                          disabled={isEnhancing}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isEnhancing ? 'bg-primary-50 text-primary-400' : 'bg-primary-100 text-primary-700 hover:bg-primary-200 dark:bg-primary-900/30 dark:text-primary-400'}`}
+                        >
+                          <svg className={`h-3 w-3 ${isEnhancing ? 'animate-spin' : ''}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+                          {isEnhancing ? 'Refining Text...' : 'Refine Grammar & Style'}
+                        </button>
+                      </div>
                     </div>
                     {EditorComponent && (
                       <EditorComponent 
@@ -580,6 +707,24 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                     </div>
                   </div>
                   <div className="prose prose-slate lg:prose-2xl dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: editingPost.content || '' }} />
+                  {hasSocialKit && (
+                    <div className="rounded-[2rem] border border-violet-100 bg-white p-6 shadow-xl dark:border-violet-900/40 dark:bg-slate-900">
+                      <p className="mb-4 text-xs font-black uppercase tracking-[0.25em] text-violet-500">Social Media Preview</p>
+                      <div className="grid gap-6 md:grid-cols-[220px_1fr]">
+                        <img src={editingPost.infographicUrl} className="aspect-square w-full rounded-2xl object-cover" alt="Generated infographic" />
+                        <div className="space-y-4">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">AI Summary</p>
+                            <p className="mt-1 text-sm leading-relaxed text-slate-700 dark:text-slate-300">{editingPost.aiSummary}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Caption</p>
+                            <p className="mt-1 whitespace-pre-wrap rounded-2xl bg-slate-50 p-4 text-sm leading-relaxed text-slate-700 dark:bg-slate-950 dark:text-slate-300">{editingPost.socialCaption}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -605,6 +750,33 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
               <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8">
                 {activeSidebarTab === 'settings' ? (
                   <>
+                    <section className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-black uppercase tracking-tighter text-slate-400">Post Lifecycle</h4>
+                        <span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wider ${STATUS_STYLES[editingPost.status || 'draft']}`}>
+                          {STATUS_LABELS[editingPost.status || 'draft']}
+                        </span>
+                      </div>
+                      <div className="space-y-3">
+                        {LIFECYCLE_STEPS.map((step, index) => {
+                          const isComplete = lifecycleIndex > index || (step.status === 'social_posted' && editingPost.status === 'social_posted');
+                          const isCurrent = lifecycleIndex === index;
+
+                          return (
+                            <div key={step.status} className={`flex gap-3 rounded-2xl border p-3 transition-all ${isCurrent ? 'border-primary-200 bg-primary-50 dark:border-primary-800 dark:bg-primary-950/20' : 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/40'}`}>
+                              <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-black ${isComplete ? 'bg-emerald-500 text-white' : isCurrent ? 'bg-primary-600 text-white' : 'bg-slate-200 text-slate-500 dark:bg-slate-800'}`}>
+                                {isComplete ? '✓' : index + 1}
+                              </div>
+                              <div>
+                                <p className="text-xs font-black text-slate-900 dark:text-white">{step.title}</p>
+                                <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">{step.description}</p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+
                     <section className="space-y-4">
                       <h4 className="text-xs font-black uppercase tracking-tighter text-slate-400">Visibility & Status</h4>
                       <div className="space-y-3">
@@ -670,6 +842,40 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
                                </span>
                              ))}
                           </div>
+                       </div>
+                    </section>
+
+                    <section className="space-y-4">
+                       <div className="flex items-center justify-between">
+                         <h4 className="text-xs font-black uppercase tracking-tighter text-slate-400">AI Social Kit</h4>
+                         <button
+                           onClick={handleGenerateSocialKit}
+                           disabled={isGeneratingSocialKit || !editingPost.title || !editingPost.content}
+                           className="rounded-lg bg-violet-100 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-violet-700 hover:bg-violet-200 disabled:opacity-50 dark:bg-violet-900/30 dark:text-violet-300"
+                         >
+                           {hasSocialKit ? 'Regenerate' : 'Generate'}
+                         </button>
+                       </div>
+                       <div className="space-y-3 rounded-2xl border border-violet-100 bg-violet-50/60 p-4 dark:border-violet-900/40 dark:bg-violet-950/20">
+                         <textarea
+                           value={editingPost.aiSummary || ''}
+                           onChange={(e) => setEditingPost(prev => prev ? ({ ...prev, aiSummary: e.target.value }) : null)}
+                           placeholder="AI summary will appear here..."
+                           className="w-full rounded-xl border border-violet-100 bg-white px-3 py-2 text-xs dark:border-violet-900/50 dark:bg-slate-900 dark:text-white h-20 resize-none"
+                         />
+                         <textarea
+                           value={editingPost.socialCaption || ''}
+                           onChange={(e) => setEditingPost(prev => prev ? ({ ...prev, socialCaption: e.target.value }) : null)}
+                           placeholder="Social media caption..."
+                           className="w-full rounded-xl border border-violet-100 bg-white px-3 py-2 text-xs dark:border-violet-900/50 dark:bg-slate-900 dark:text-white h-24 resize-none"
+                         />
+                         <div className="overflow-hidden rounded-xl border border-violet-100 bg-white dark:border-violet-900/50 dark:bg-slate-900">
+                           {editingPost.infographicUrl ? (
+                             <img src={editingPost.infographicUrl} className="aspect-square w-full object-cover" alt="Generated infographic preview" />
+                           ) : (
+                             <div className="flex aspect-square items-center justify-center p-6 text-center text-[10px] font-bold uppercase tracking-widest text-violet-300">Generated infographic preview</div>
+                           )}
+                         </div>
                        </div>
                     </section>
 
@@ -771,23 +977,20 @@ const WriterDashboard: React.FC<WriterDashboardProps> = ({
               </div>
 
               <div className="p-6 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
-                <div className="grid grid-cols-2 gap-2 mb-4">
-                   <button onClick={() => savePost('draft')} className="py-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">Draft</button>
-                   <button onClick={() => savePost('review')} className="py-2 text-[10px] font-bold uppercase tracking-widest text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/30 rounded-xl border border-primary-200 dark:border-primary-800">Submit</button>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                   <button onClick={() => savePost('draft')} className="py-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">Save Draft</button>
+                   <button onClick={handleGenerateSocialKit} disabled={isGeneratingSocialKit || !editingPost.title || !editingPost.content} className="py-2 text-[10px] font-bold uppercase tracking-widest text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 rounded-xl border border-violet-200 dark:border-violet-800 disabled:opacity-40">AI Kit</button>
                 </div>
-                <div className="relative group">
-                   <button onClick={() => savePost('published')} disabled={!canPublish} className="w-full py-3 text-xs font-bold uppercase tracking-widest bg-primary-600 text-white rounded-xl hover:bg-primary-700 disabled:opacity-40 shadow-lg shadow-primary-500/20">Publish Post</button>
-                   {!canPublish && (
-                    <div className="absolute bottom-full right-0 mb-3 w-full p-3 bg-slate-900 text-white text-[10px] rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-slate-700">
-                      <p className="font-bold mb-1 text-amber-400">Missing:</p>
-                      <ul className="space-y-1">
-                        <li className="flex items-center gap-1"><span className={wordCount >= minWordsNeeded ? 'text-emerald-400' : 'text-slate-500'}>●</span> {minWordsNeeded} Words</li>
-                        <li className="flex items-center gap-1"><span className={currentLikes >= likesNeeded ? 'text-emerald-400' : 'text-slate-500'}>●</span> {likesNeeded} Likes</li>
-                        <li className="flex items-center gap-1"><span className={unresolvedReviewsCount === 0 ? 'text-emerald-400' : 'text-slate-500'}>●</span> Feedback resolved</li>
-                      </ul>
-                    </div>
-                  )}
+                <div className="grid grid-cols-1 gap-2">
+                   <button onClick={handleSendAuthorReview} disabled={!canSendAuthorReview} className="py-2.5 text-[10px] font-bold uppercase tracking-widest bg-sky-600 text-white rounded-xl hover:bg-sky-700 disabled:opacity-40 shadow-lg shadow-sky-500/20">Send to Author Review</button>
+                   <button onClick={handleAuthorApprove} disabled={editingPost.status !== 'author_review'} className="py-2.5 text-[10px] font-bold uppercase tracking-widest bg-amber-600 text-white rounded-xl hover:bg-amber-700 disabled:opacity-40 shadow-lg shadow-amber-500/20">Author Approves → Reviewer</button>
+                   <button onClick={handleReviewerApprove} disabled={!canReviewerApprove || !canSendReviewerReview} className="py-2.5 text-[10px] font-bold uppercase tracking-widest bg-teal-600 text-white rounded-xl hover:bg-teal-700 disabled:opacity-40 shadow-lg shadow-teal-500/20">Reviewer Approves</button>
+                   <button onClick={handlePublishWebsite} disabled={!canPublish} className="py-2.5 text-[10px] font-bold uppercase tracking-widest bg-primary-600 text-white rounded-xl hover:bg-primary-700 disabled:opacity-40 shadow-lg shadow-primary-500/20">Post Blog to Website</button>
+                   <button onClick={handlePostSocial} disabled={!canPostSocial} className="py-2.5 text-[10px] font-bold uppercase tracking-widest bg-fuchsia-600 text-white rounded-xl hover:bg-fuchsia-700 disabled:opacity-40 shadow-lg shadow-fuchsia-500/20">Post to Social Media</button>
                 </div>
+                <p className="mt-3 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
+                  Requirements: generate the AI kit, send it to the author, resolve reviewer feedback, publish to the website, then push the approved caption and infographic to social channels.
+                </p>
               </div>
             </aside>
           )}

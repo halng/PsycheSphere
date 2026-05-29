@@ -5,15 +5,18 @@ import BlogCard from './components/BlogCard';
 import PostDetail from './components/PostDetail';
 import WriterDashboard from './components/WriterDashboard';
 import ProfilePage from './components/ProfilePage';
-import { BlogPost, UserRole, Review, UserProfile, Notification } from './types';
+import { BlogPost, UserRole, Review, UserProfile, Notification, WriterAccessRequest } from './types';
 import { INITIAL_POSTS } from './constants';
+import { isFirebaseConfigured, postService, userService, writerRequestService } from './services/firebaseService';
+
+const CURRENT_USER_ID = 'current-user';
 
 const App: React.FC = () => {
   const [posts, setPosts] = useState<BlogPost[]>(INITIAL_POSTS);
   const [role, setRole] = useState<UserRole>('reader');
   const [isDark, setIsDark] = useState(false);
   const [selectedPost, setSelectedPost] = useState<BlogPost | null>(null);
-  const [currentView, setCurrentView] = useState<'feed' | 'profile'>('feed');
+  const [currentView, setCurrentView] = useState<'feed' | 'profile' | 'writer-request'>('feed');
   const [readerFeedTab, setReaderFeedTab] = useState<'published' | 'review' | 'following'>('published');
   const [searchQuery, setSearchQuery] = useState('');
   const [profile, setProfile] = useState<UserProfile>({
@@ -24,6 +27,14 @@ const App: React.FC = () => {
     followedAuthors: []
   });
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [writerRequest, setWriterRequest] = useState<WriterAccessRequest>({
+    name: '',
+    email: '',
+    expertise: '',
+    sampleTopic: '',
+    reason: '',
+    status: 'none'
+  });
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -33,6 +44,43 @@ const App: React.FC = () => {
       root.classList.remove('dark');
     }
   }, [isDark]);
+
+  useEffect(() => {
+    if (!isFirebaseConfigured) return;
+
+    const loadBackendData = async () => {
+      try {
+        const [remotePosts, remoteUser] = await Promise.all([
+          postService.list(),
+          userService.get(CURRENT_USER_ID)
+        ]);
+
+        if (remotePosts.length > 0) setPosts(remotePosts);
+        if (remoteUser?.profile) setProfile(remoteUser.profile);
+        if (remoteUser?.role) setRole(remoteUser.role);
+        if (remoteUser?.writerRequest) setWriterRequest(remoteUser.writerRequest);
+      } catch (error) {
+        console.error('Failed to load Firebase data:', error);
+      }
+    };
+
+    loadBackendData();
+  }, []);
+
+  const persistCurrentUser = async (nextProfile: UserProfile, nextRole: UserRole, nextWriterRequest: WriterAccessRequest) => {
+    if (!isFirebaseConfigured) return;
+
+    try {
+      await userService.upsert({
+        id: CURRENT_USER_ID,
+        profile: nextProfile,
+        role: nextRole,
+        writerRequest: nextWriterRequest
+      });
+    } catch (error) {
+      console.error('Failed to persist Firebase user:', error);
+    }
+  };
 
   const toggleTheme = () => setIsDark(!isDark);
 
@@ -92,6 +140,10 @@ const App: React.FC = () => {
   };
 
   const handleSavePost = (newPost: BlogPost) => {
+    if (isFirebaseConfigured) {
+      postService.upsert(newPost).catch(error => console.error('Failed to persist Firebase post:', error));
+    }
+
     setPosts(prev => {
       const exists = prev.find(p => p.id === newPost.id);
       
@@ -137,18 +189,66 @@ const App: React.FC = () => {
   };
 
   const handleDeletePost = (id: string) => {
+    if (isFirebaseConfigured) {
+      postService.delete(id).catch(error => console.error('Failed to delete Firebase post:', error));
+    }
     setPosts(prev => prev.filter(p => p.id !== id));
   };
 
-  const featuredPost = useMemo(() => posts.find(p => p.status === 'published' && p.isFeatured), [posts]);
+  const handleUpdateProfile = (nextProfile: UserProfile) => {
+    setProfile(nextProfile);
+    persistCurrentUser(nextProfile, role, writerRequest);
+  };
+
+  const handleSubmitWriterRequest = (request: WriterAccessRequest) => {
+    const submittedRequest = {
+      ...request,
+      status: 'pending' as const,
+      submittedAt: new Date().toISOString().split('T')[0]
+    };
+    setWriterRequest(submittedRequest);
+    persistCurrentUser(profile, role, submittedRequest);
+    if (isFirebaseConfigured) {
+      writerRequestService.upsert(CURRENT_USER_ID, submittedRequest).catch(error => console.error('Failed to persist Firebase writer request:', error));
+    }
+    setNotifications(prev => [{
+      id: Math.random().toString(36).substring(7),
+      title: 'Writer Access Request Submitted',
+      message: `${submittedRequest.name || profile.displayName} requested writer access for ${submittedRequest.expertise || 'new psychology content'}.`,
+      date: submittedRequest.submittedAt,
+      read: false,
+      type: 'system'
+    }, ...prev]);
+  };
+
+  const handleApproveWriterRequest = () => {
+    const approvedAt = new Date().toISOString().split('T')[0];
+    const approvedRequest = { ...writerRequest, status: 'approved' as const, approvedAt };
+    setWriterRequest(approvedRequest);
+    persistCurrentUser(profile, role, approvedRequest);
+    if (isFirebaseConfigured) {
+      writerRequestService.upsert(CURRENT_USER_ID, approvedRequest).catch(error => console.error('Failed to persist Firebase writer approval:', error));
+    }
+    setNotifications(prev => [{
+      id: Math.random().toString(36).substring(7),
+      title: 'Writer Access Approved',
+      message: 'Your reader account now has writer permissions. Switch to Writer to create a post.',
+      date: approvedAt,
+      read: false,
+      type: 'system'
+    }, ...prev]);
+  };
+
+  const isPublicPost = (post: BlogPost) => post.status === 'published' || post.status === 'social_posted';
+  const featuredPost = useMemo(() => posts.find(p => isPublicPost(p) && p.isFeatured), [posts]);
   
   const filteredPosts = useMemo(() => {
     return posts.filter(p => {
       let matchesTab = false;
       if (readerFeedTab === 'following') {
-        matchesTab = p.status === 'published' && profile.followedAuthors.includes(p.author);
+        matchesTab = isPublicPost(p) && profile.followedAuthors.includes(p.author);
       } else {
-        matchesTab = p.status === readerFeedTab;
+        matchesTab = readerFeedTab === 'published' ? isPublicPost(p) : p.status === readerFeedTab;
       }
 
       const query = searchQuery.toLowerCase().trim();
@@ -168,7 +268,7 @@ const App: React.FC = () => {
   const relatedPosts = useMemo(() => {
     if (!selectedPost) return [];
     return posts
-      .filter(p => p.id !== selectedPost.id && p.status === 'published')
+      .filter(p => p.id !== selectedPost.id && isPublicPost(p))
       .filter(p => 
         p.category === selectedPost.category || 
         p.tags?.some(tag => selectedPost.tags?.includes(tag))
@@ -181,7 +281,14 @@ const App: React.FC = () => {
       <Navbar 
         role={role} 
         setRole={(r) => {
+          if (r === 'writer' && writerRequest.status !== 'approved') {
+            setSelectedPost(null);
+            setCurrentView('writer-request');
+            setSearchQuery('');
+            return;
+          }
           setRole(r);
+          persistCurrentUser(profile, r, writerRequest);
           setSelectedPost(null);
           setCurrentView('feed');
           setSearchQuery('');
@@ -199,6 +306,13 @@ const App: React.FC = () => {
           setSearchQuery('');
         }}
         currentView={currentView}
+        canSwitchToWriter={writerRequest.status === 'approved'}
+        onRequestWriterAccess={() => {
+          setSelectedPost(null);
+          setRole('reader');
+          setCurrentView('writer-request');
+          setSearchQuery('');
+        }}
         profile={profile}
         notifications={notifications}
         onMarkRead={handleMarkNotificationRead}
@@ -219,11 +333,61 @@ const App: React.FC = () => {
                 onFollow={() => handleFollowAuthor(selectedPost.author)}
                 onUnfollow={() => handleUnfollowAuthor(selectedPost.author)}
               />
+            ) : currentView === 'writer-request' ? (
+              <section className="mx-auto max-w-5xl space-y-8 animate-in fade-in slide-in-from-bottom-4">
+                <div className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+                  <div className="grid gap-0 lg:grid-cols-[0.9fr_1.1fr]">
+                    <div className="bg-gradient-to-br from-primary-600 to-violet-700 p-8 text-white lg:p-10">
+                      <p className="text-xs font-black uppercase tracking-[0.3em] text-primary-100">Reader → Writer</p>
+                      <h1 className="mt-4 text-4xl font-black tracking-tight">Request a writer account</h1>
+                      <p className="mt-4 text-primary-50 leading-relaxed">Readers can become contributors by filling out this form. After approval, the account gains writer permissions and can switch into Author Studio to create posts.</p>
+                      <div className="mt-8 space-y-3 text-sm">
+                        {['Submit request', 'Approval grants writer access', 'Switch to Writer', 'Create and preview a new post'].map((step, index) => (
+                          <div key={step} className="flex items-center gap-3">
+                            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-xs font-black">{index + 1}</span>
+                            <span className="font-semibold">{step}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="p-8 lg:p-10">
+                      {writerRequest.status === 'approved' ? (
+                        <div className="space-y-6">
+                          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+                            <p className="font-black">Writer access approved</p>
+                            <p className="mt-1 text-sm">Approved on {writerRequest.approvedAt}. You can now switch to Writer and draft a post.</p>
+                          </div>
+                          <button onClick={() => { setRole('writer'); persistCurrentUser(profile, 'writer', writerRequest); setCurrentView('feed'); }} className="w-full rounded-xl bg-primary-600 px-6 py-3 font-bold text-white shadow-lg shadow-primary-500/20 hover:bg-primary-700">Switch to Writer</button>
+                        </div>
+                      ) : (
+                        <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); handleSubmitWriterRequest(writerRequest); }}>
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <input required value={writerRequest.name} onChange={(e) => setWriterRequest(prev => ({ ...prev, name: e.target.value }))} placeholder="Full name" className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-primary-500 dark:border-slate-800 dark:bg-slate-950 dark:text-white" />
+                            <input required type="email" value={writerRequest.email} onChange={(e) => setWriterRequest(prev => ({ ...prev, email: e.target.value }))} placeholder="Email address" className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-primary-500 dark:border-slate-800 dark:bg-slate-950 dark:text-white" />
+                          </div>
+                          <input required value={writerRequest.expertise} onChange={(e) => setWriterRequest(prev => ({ ...prev, expertise: e.target.value }))} placeholder="Area of expertise (e.g., clinical psychology, wellness coaching)" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-primary-500 dark:border-slate-800 dark:bg-slate-950 dark:text-white" />
+                          <input required value={writerRequest.sampleTopic} onChange={(e) => setWriterRequest(prev => ({ ...prev, sampleTopic: e.target.value }))} placeholder="Sample article topic" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-primary-500 dark:border-slate-800 dark:bg-slate-950 dark:text-white" />
+                          <textarea required value={writerRequest.reason} onChange={(e) => setWriterRequest(prev => ({ ...prev, reason: e.target.value }))} placeholder="Tell reviewers why you want to write for PsycheSphere..." rows={5} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-primary-500 dark:border-slate-800 dark:bg-slate-950 dark:text-white" />
+                          <button type="submit" className="w-full rounded-xl bg-primary-600 px-6 py-3 font-bold text-white shadow-lg shadow-primary-500/20 hover:bg-primary-700">{writerRequest.status === 'pending' ? 'Update Pending Request' : 'Request Writer Account'}</button>
+                          {writerRequest.status === 'pending' && (
+                            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+                              <p className="font-bold">Request pending since {writerRequest.submittedAt}.</p>
+                              <p className="mt-1">Demo admin action: approve this request to unlock writer mode.</p>
+                              <button type="button" onClick={handleApproveWriterRequest} className="mt-3 rounded-lg bg-amber-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white hover:bg-amber-700">Approve Request</button>
+                            </div>
+                          )}
+                        </form>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </section>
             ) : currentView === 'profile' ? (
               <ProfilePage 
                 profile={profile}
                 posts={posts}
-                onUpdateProfile={setProfile}
+                onUpdateProfile={handleUpdateProfile}
                 onSelectPost={handleSelectPost}
                 onUnfollow={handleUnfollowAuthor}
               />
@@ -238,6 +402,20 @@ const App: React.FC = () => {
                       Discover refined insights into cognitive science, behavior, and mental wellness through professional peer-reviewed research.
                     </p>
                   </div>
+
+                  {writerRequest.status !== 'approved' && (
+                    <div className="rounded-3xl border border-primary-100 bg-primary-50/70 p-5 dark:border-primary-900/40 dark:bg-primary-950/20">
+                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <p className="text-sm font-black uppercase tracking-widest text-primary-600 dark:text-primary-400">Want to write for PsycheSphere?</p>
+                          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Fill out a writer account request. Once approved, you can switch from reader to writer and create posts.</p>
+                        </div>
+                        <button onClick={() => setCurrentView('writer-request')} className="rounded-xl bg-primary-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-primary-500/20 hover:bg-primary-700">
+                          {writerRequest.status === 'pending' ? 'View Request' : 'Request Writer Access'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                     <div className="flex bg-slate-200/50 dark:bg-slate-900 p-1 rounded-2xl border border-slate-200 dark:border-slate-800 self-start shadow-sm">
