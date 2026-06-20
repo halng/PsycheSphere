@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -20,7 +19,7 @@ export async function polishPsychologyContent(title: string, content: string): P
       Title: ${title}
       Content: ${content}`,
       config: {
-        temperature: 0.3, // Lower temperature for more consistent, less creative edits
+        temperature: 0.3,
         topP: 0.8,
         topK: 40,
       }

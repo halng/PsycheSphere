@@ -1,5 +1,11 @@
-
-export type PostStatus = 'draft' | 'review' | 'published';
+export type PostStatus =
+  | 'draft'
+  | 'ai_generated'
+  | 'author_review'
+  | 'review'
+  | 'reviewer_approved'
+  | 'published'
+  | 'social_posted';
 
 export interface Review {
   id: string;
@@ -26,6 +32,14 @@ export interface BlogPost {
   isFeatured?: boolean;
   tags?: string[];
   metaDescription?: string;
+  aiSummary?: string;
+  infographicUrl?: string;
+  socialCaption?: string;
+  socialChannels?: string[];
+  authorApprovedAt?: string;
+  reviewerApprovedAt?: string;
+  publishedAt?: string;
+  socialPostedAt?: string;
 }
 
 export type UserRole = 'reader' | 'writer';
@@ -36,6 +50,17 @@ export interface UserProfile {
   bio: string;
   avatarUrl: string;
   followedAuthors: string[];
+}
+
+export interface WriterAccessRequest {
+  name: string;
+  email: string;
+  expertise: string;
+  sampleTopic: string;
+  reason: string;
+  status: 'none' | 'pending' | 'approved';
+  submittedAt?: string;
+  approvedAt?: string;
 }
 
 export interface Notification {
